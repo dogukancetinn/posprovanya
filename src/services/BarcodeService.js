@@ -1,10 +1,12 @@
 // Barkod işleme ve ürün arama servisi
+const log = require("electron-log")
 class BarcodeService {
   constructor(dbManager) {
     this.dbManager = dbManager
     this.scannerConnected = false
     this.lastScanTime = 0
     this.scanCooldown = 500 // 500ms cooldown between scans
+    this.supportedFormats = ['EAN-13', 'EAN-8', 'UPC-A', 'UPC-E', 'Code128']
   }
 
   // Barkod formatını doğrula
@@ -72,6 +74,7 @@ class BarcodeService {
       const product = await this.dbManager.searchProductByBarcode(barcode)
 
       if (!product) {
+        log.warn(`Product not found for barcode: ${barcode}`)
         // Ürün bulunamadı, alternatif arama yap
         const alternatives = await this.searchAlternatives(barcode)
         return {
@@ -84,6 +87,7 @@ class BarcodeService {
 
       // Stok kontrolü
       if (product.stock <= 0) {
+        log.warn(`Product out of stock: ${product.name} (${barcode})`)
         return {
           success: false,
           error: "Ürün stokta yok",
@@ -93,6 +97,7 @@ class BarcodeService {
 
       // Ürün aktif mi kontrolü
       if (product.is_active === 0) {
+        log.warn(`Product inactive: ${product.name} (${barcode})`)
         return {
           success: false,
           error: "Ürün satışa kapalı",
@@ -100,6 +105,7 @@ class BarcodeService {
         }
       }
 
+      log.info(`Product found: ${product.name} (${barcode})`)
       return {
         success: true,
         product: {
@@ -115,7 +121,7 @@ class BarcodeService {
         },
       }
     } catch (error) {
-      console.error("Barcode scan error:", error)
+      log.error("Barcode scan error:", error)
       return {
         success: false,
         error: "Barkod tarama hatası: " + error.message,

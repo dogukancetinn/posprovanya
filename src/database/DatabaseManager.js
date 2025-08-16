@@ -3,6 +3,7 @@ const path = require("path")
 const fs = require("fs")
 const crypto = require("crypto-js")
 const { app } = require("electron")
+const log = require("electron-log")
 
 class DatabaseManager {
   constructor() {
@@ -10,6 +11,7 @@ class DatabaseManager {
     this.dbPath = null
     this.encryptionKey = this.getEncryptionKey()
     this.isInitialized = false
+    this.connectionPool = null
   }
 
   getEncryptionKey() {
@@ -43,12 +45,14 @@ class DatabaseManager {
       this.dbPath = path.join(dbDir, "pos.db")
 
       this.db = new Database(this.dbPath)
-      console.log("Connected to SQLite database:", this.dbPath)
+      log.info("Connected to SQLite database:", this.dbPath)
 
       // Veritabanı ayarları
       this.db.pragma("foreign_keys = ON")
       this.db.pragma("journal_mode = WAL")
       this.db.pragma("synchronous = NORMAL")
+      this.db.pragma("cache_size = 10000")
+      this.db.pragma("temp_store = memory")
 
       // Tabloları oluştur
       await this.createTables()
@@ -57,9 +61,9 @@ class DatabaseManager {
       await this.seedDefaultData()
 
       this.isInitialized = true
-      console.log("Database initialized successfully")
+      log.info("Database initialized successfully")
     } catch (error) {
-      console.error("Database initialization error:", error)
+      log.error("Database initialization error:", error)
       throw error
     }
   }
@@ -77,6 +81,10 @@ class DatabaseManager {
         description TEXT,
         image TEXT,
         woocommerce_id INTEGER,
+        tax_rate REAL DEFAULT 0.18,
+        min_stock INTEGER DEFAULT 0,
+        supplier TEXT,
+        is_active INTEGER DEFAULT 1,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
       )`,
@@ -87,10 +95,12 @@ class DatabaseManager {
         sale_number TEXT UNIQUE NOT NULL,
         subtotal REAL NOT NULL,
         discount REAL DEFAULT 0,
+        tax_amount REAL DEFAULT 0,
         total REAL NOT NULL,
         payment_method TEXT NOT NULL,
         customer_name TEXT,
         customer_phone TEXT,
+        notes TEXT,
         status TEXT DEFAULT 'completed',
         synced INTEGER DEFAULT 0,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -143,6 +153,30 @@ class DatabaseManager {
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (product_id) REFERENCES products (id)
       )`,
+
+      // Kategoriler tablosu
+      `CREATE TABLE IF NOT EXISTS categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        parent_id INTEGER,
+        is_active INTEGER DEFAULT 1,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (parent_id) REFERENCES categories (id)
+      )`,
+
+      // Ödeme işlemleri tablosu
+      `CREATE TABLE IF NOT EXISTS payment_transactions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sale_id INTEGER NOT NULL,
+        payment_method TEXT NOT NULL,
+        amount REAL NOT NULL,
+        transaction_id TEXT,
+        pos_response TEXT,
+        status TEXT DEFAULT 'completed',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (sale_id) REFERENCES sales (id) ON DELETE CASCADE
+      )`,
     ]
 
     for (const tableSQL of tables) {
@@ -152,10 +186,17 @@ class DatabaseManager {
     // İndeksler oluştur
     const indexes = [
       "CREATE INDEX IF NOT EXISTS idx_products_barcode ON products (barcode)",
+      "CREATE INDEX IF NOT EXISTS idx_products_woocommerce_id ON products (woocommerce_id)",
+      "CREATE INDEX IF NOT EXISTS idx_products_category ON products (category)",
+      "CREATE INDEX IF NOT EXISTS idx_products_is_active ON products (is_active)",
       "CREATE INDEX IF NOT EXISTS idx_sales_created_at ON sales (created_at)",
       "CREATE INDEX IF NOT EXISTS idx_sales_synced ON sales (synced)",
+      "CREATE INDEX IF NOT EXISTS idx_sales_sale_number ON sales (sale_number)",
       "CREATE INDEX IF NOT EXISTS idx_sale_items_sale_id ON sale_items (sale_id)",
+      "CREATE INDEX IF NOT EXISTS idx_sale_items_product_id ON sale_items (product_id)",
       "CREATE INDEX IF NOT EXISTS idx_stock_movements_product_id ON stock_movements (product_id)",
+      "CREATE INDEX IF NOT EXISTS idx_payment_transactions_sale_id ON payment_transactions (sale_id)",
+      "CREATE INDEX IF NOT EXISTS idx_sync_log_created_at ON sync_log (created_at)",
     ]
 
     for (const indexSQL of indexes) {
@@ -219,31 +260,43 @@ class DatabaseManager {
   // Temel veritabanı işlemleri
   runQuery(sql, params = []) {
     try {
+      if (!this.db) {
+        throw new Error("Database not initialized")
+      }
+      
       const stmt = this.db.prepare(sql)
       const result = stmt.run(params)
       return { id: result.lastInsertRowid, changes: result.changes }
     } catch (error) {
-      console.error("SQL Error:", error, "Query:", sql)
+      log.error("SQL Error:", { error: error.message, sql, params })
       throw error
     }
   }
 
   getQuery(sql, params = []) {
     try {
+      if (!this.db) {
+        throw new Error("Database not initialized")
+      }
+      
       const stmt = this.db.prepare(sql)
       return stmt.get(params)
     } catch (error) {
-      console.error("SQL Error:", error, "Query:", sql)
+      log.error("SQL Error:", { error: error.message, sql, params })
       throw error
     }
   }
 
   allQuery(sql, params = []) {
     try {
+      if (!this.db) {
+        throw new Error("Database not initialized")
+      }
+      
       const stmt = this.db.prepare(sql)
       return stmt.all(params)
     } catch (error) {
-      console.error("SQL Error:", error, "Query:", sql)
+      log.error("SQL Error:", { error: error.message, sql, params })
       throw error
     }
   }
@@ -251,10 +304,13 @@ class DatabaseManager {
   // Ürün işlemleri
   async searchProductByBarcode(barcode) {
     try {
-      const product = await this.getQuery("SELECT * FROM products WHERE barcode = ? AND stock > 0", [barcode])
+      const product = await this.getQuery(
+        "SELECT * FROM products WHERE barcode = ? AND is_active = 1", 
+        [barcode]
+      )
       return product
     } catch (error) {
-      console.error("Product search error:", error)
+      log.error("Product search error:", error)
       throw error
     }
   }
@@ -283,9 +339,10 @@ class DatabaseManager {
         await this.addStockMovement(result.id, "in", productData.stock, "İlk stok girişi")
       }
 
+      log.info(`Product added: ${productData.name} (ID: ${result.id})`)
       return result
     } catch (error) {
-      console.error("Add product error:", error)
+      log.error("Add product error:", error)
       throw error
     }
   }
@@ -381,6 +438,8 @@ class DatabaseManager {
           )
         }
 
+        log.info(`Sale saved: ${saleNumber} (ID: ${saleId}), Total: ${saleData.total}`)
+        
         return {
           success: true,
           saleId: saleId,
@@ -394,7 +453,7 @@ class DatabaseManager {
     try {
       return transaction(saleData)
     } catch (error) {
-      console.error("Save sale error:", error)
+      log.error("Save sale error:", error)
       throw error
     }
   }
@@ -603,10 +662,10 @@ class DatabaseManager {
     try {
       if (this.db) {
         this.db.close()
-        console.log("Database connection closed")
+        log.info("Database connection closed")
       }
     } catch (error) {
-      console.error("Database close error:", error)
+      log.error("Database close error:", error)
     }
   }
 

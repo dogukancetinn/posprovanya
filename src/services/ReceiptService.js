@@ -2,6 +2,7 @@
 const fs = require("fs")
 const path = require("path")
 const { app } = require("electron")
+const log = require("electron-log")
 
 class ReceiptService {
   constructor() {
@@ -15,6 +16,8 @@ class ReceiptService {
       taxNumber: "1234567890",
       website: "www.provanya.com",
     }
+    this.receiptWidth = 32 // Karakter genişliği
+    this.lineHeight = 1
   }
 
   // Yazıcı bağlantısını başlat
@@ -34,7 +37,7 @@ class ReceiptService {
       if (thermalPrinter) {
         this.printerName = thermalPrinter.name
         this.printerConnected = true
-        console.log("Thermal printer found:", this.printerName)
+        log.info("Thermal printer found:", this.printerName)
         return { success: true, printer: this.printerName }
       }
 
@@ -42,16 +45,17 @@ class ReceiptService {
       if (printers.length > 0) {
         this.printerName = printers[0].name
         this.printerConnected = true
-        console.log("Using default printer:", this.printerName)
+        log.info("Using default printer:", this.printerName)
         return { success: true, printer: this.printerName }
       }
 
+      log.warn("No printer found")
       return {
         success: false,
         error: "Yazıcı bulunamadı",
       }
     } catch (error) {
-      console.error("Printer initialization error:", error)
+      log.error("Printer initialization error:", error)
       return {
         success: false,
         error: "Yazıcı başlatılamadı: " + error.message,
@@ -89,6 +93,7 @@ class ReceiptService {
       if (printResult.success) {
         // Fiş kopyasını kaydet
         await this.saveReceiptCopy(saleData, transactionData, receiptContent)
+        log.info(`Receipt printed for sale: ${saleData.saleNumber}`)
 
         return {
           success: true,
@@ -98,7 +103,7 @@ class ReceiptService {
         return printResult
       }
     } catch (error) {
-      console.error("Print receipt error:", error)
+      log.error("Print receipt error:", error)
       return {
         success: false,
         error: "Fiş yazdırılamadı: " + error.message,
@@ -209,8 +214,8 @@ class ReceiptService {
     return new Promise((resolve) => {
       // Mock printing - gerçek implementasyonda yazıcı API'si kullanılacak
       setTimeout(() => {
-        console.log("Printing receipt...")
-        console.log(content)
+        log.info("Printing receipt...")
+        log.debug("Receipt content:", content)
 
         // %95 başarı oranı simülasyonu
         if (Math.random() > 0.05) {
@@ -303,9 +308,9 @@ class ReceiptService {
       }
 
       fs.writeFileSync(filepath, JSON.stringify(receiptData, null, 2))
-      console.log("Receipt copy saved:", filepath)
+      log.info("Receipt copy saved:", filepath)
     } catch (error) {
-      console.error("Save receipt copy error:", error)
+      log.error("Save receipt copy error:", error)
     }
   }
 

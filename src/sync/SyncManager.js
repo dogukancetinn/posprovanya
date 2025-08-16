@@ -2,6 +2,7 @@
 const cron = require("node-cron")
 const axios = require("axios")
 const OfflineManager = require("./OfflineManager")
+const log = require("electron-log")
 
 class SyncManager {
   constructor(dbManager, wooAPI = null) {
@@ -23,6 +24,7 @@ class SyncManager {
     }
     this.syncQueue = []
     this.conflictResolutionStrategy = "local_wins" // 'local_wins', 'remote_wins', 'merge'
+    this.connectionCheckInterval = null
   }
 
   // Sync manager'ı başlat
@@ -47,10 +49,10 @@ class SyncManager {
       // İnternet bağlantısını kontrol et
       this.startConnectionMonitoring()
 
-      console.log("SyncManager initialized successfully")
+      log.info("SyncManager initialized successfully")
       return { success: true }
     } catch (error) {
-      console.error("SyncManager initialization error:", error)
+      log.error("SyncManager initialization error:", error)
       return {
         success: false,
         error: "Sync manager başlatılamadı: " + error.message,
@@ -160,12 +162,12 @@ class SyncManager {
 
   // İnternet bağlantısı izlemeyi başlat
   startConnectionMonitoring() {
-    setInterval(async () => {
+    this.connectionCheckInterval = setInterval(async () => {
       const wasOnline = this.isOnline
       this.isOnline = await this.checkInternetConnection()
 
       if (!wasOnline && this.isOnline) {
-        console.log("Internet connection restored, starting sync...")
+        log.info("Internet connection restored, starting sync...")
 
         // Offline moddan çık
         if (this.offlineManager.isOfflineMode) {
@@ -180,7 +182,7 @@ class SyncManager {
           this.syncPendingSales()
         }, 2000)
       } else if (wasOnline && !this.isOnline) {
-        console.log("Internet connection lost, entering offline mode...")
+        log.warn("Internet connection lost, entering offline mode...")
 
         // Offline moda geç
         await this.offlineManager.enterOfflineMode()
@@ -191,12 +193,13 @@ class SyncManager {
   // İnternet bağlantısını kontrol et
   async checkInternetConnection() {
     try {
-      const response = await axios.get("https://www.google.com", {
+      const response = await axios.get("https://httpbin.org/status/200", {
         timeout: 5000,
         validateStatus: () => true,
       })
       return response.status === 200
     } catch (error) {
+      log.debug("Internet connection check failed:", error.message)
       return false
     }
   }
@@ -271,7 +274,7 @@ class SyncManager {
       this.isSyncing = false
     }
   }
-
+    log.info("Manual sync completed successfully", results)
   // Bekleyen satışları senkronize et
   async syncPendingSales() {
     try {
@@ -764,7 +767,7 @@ class SyncManager {
   }
 
   // Sync durumunu al
-  getSyncStatus() {
+    log.error("Manual sync error:", error)
     return {
       isOnline: this.isOnline,
       isSyncing: this.isSyncing,
@@ -839,8 +842,13 @@ class SyncManager {
 
   // Sync manager'ı durdur
   async stop() {
+    if (this.connectionCheckInterval) {
+      clearInterval(this.connectionCheckInterval)
+      this.connectionCheckInterval = null
+    }
+    
     this.stopAutoSync()
-    console.log("SyncManager stopped")
+    log.info("SyncManager stopped")
   }
 }
 

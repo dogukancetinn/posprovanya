@@ -1,6 +1,7 @@
 // WooCommerce REST API entegrasyonu
 const axios = require("axios")
 const crypto = require("crypto")
+const log = require("electron-log")
 
 class WooCommerceAPI {
   constructor(dbManager) {
@@ -12,6 +13,7 @@ class WooCommerceAPI {
     this.rateLimitDelay = 1000 // 1 saniye API çağrıları arası bekleme
     this.lastAPICall = 0
     this.maxRetries = 3
+    this.timeout = 30000 // 30 saniye timeout
   }
 
   // API yapılandırmasını yükle
@@ -36,18 +38,18 @@ class WooCommerceAPI {
         }
 
         this.isConfigured = true
-        console.log("WooCommerce API configured successfully")
+        log.info("WooCommerce API configured successfully")
 
         // Bağlantıyı test et
         const testResult = await this.testConnection()
         if (!testResult.success) {
-          console.warn("WooCommerce API test failed:", testResult.error)
+          log.warn("WooCommerce API test failed:", testResult.error)
           // Çünkü ayarlar mevcut, sadece bağlantı sorunu olabilir
         }
 
         return { success: true }
       } else {
-        console.log("WooCommerce API not configured - missing credentials")
+        log.info("WooCommerce API not configured - missing credentials")
         this.isConfigured = false
         return {
           success: false,
@@ -147,12 +149,16 @@ class WooCommerceAPI {
       const config = {
         method: method.toLowerCase(),
         url: url,
-        timeout: 30000, // 30 saniye timeout
+        timeout: this.timeout,
         headers: {
           "Content-Type": "application/json",
           "User-Agent": "PROVANYA-POS/1.0.0",
+          "Accept": "application/json"
         },
         params: method === "GET" ? oauthParams : undefined,
+        validateStatus: function (status) {
+          return status < 500 // Reject only if the status code is greater than or equal to 500
+        }
       }
 
       if (data && method !== "GET") {
@@ -167,13 +173,18 @@ class WooCommerceAPI {
         data: response.data,
         status: response.status,
         headers: response.headers,
+        requestTime: Date.now() - this.lastAPICall
       }
     } catch (error) {
-      console.error(`WooCommerce API ${method} ${endpoint} error:`, error.message)
+      log.error(`WooCommerce API ${method} ${endpoint} error:`, {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      })
 
       // Retry logic
       if (retryCount < this.maxRetries && this.shouldRetry(error)) {
-        console.log(`Retrying request (${retryCount + 1}/${this.maxRetries})...`)
+        log.info(`Retrying request (${retryCount + 1}/${this.maxRetries})...`)
         await new Promise((resolve) => setTimeout(resolve, (retryCount + 1) * 2000))
         return this.makeRequest(method, endpoint, data, retryCount + 1)
       }

@@ -1,6 +1,7 @@
 // Ödeme işleme servisi
 const { spawn } = require("child_process")
 const path = require("path")
+const log = require("electron-log")
 
 class PaymentService {
   constructor() {
@@ -8,6 +9,12 @@ class PaymentService {
     this.isConnected = false
     this.lastTransactionId = null
     this.supportedMethods = ["cash", "card", "mixed"]
+    this.deviceConfig = {
+      model: "Beko 300TR",
+      port: "COM1",
+      baudRate: 9600,
+      timeout: 30000
+    }
   }
 
   // POS cihazı bağlantısını başlat
@@ -83,6 +90,7 @@ class PaymentService {
       const transactionId = this.generateTransactionId()
       const change = receivedAmount ? Math.max(0, receivedAmount - amount) : 0
 
+      log.info(`Processing cash payment: ${amount} TL, received: ${receivedAmount || amount} TL`)
       const transaction = {
         id: transactionId,
         method: "cash",
@@ -94,13 +102,14 @@ class PaymentService {
       }
 
       this.lastTransactionId = transactionId
+      log.info(`Cash payment completed: ${transactionId}`)
 
       return {
         success: true,
         transaction: transaction,
       }
     } catch (error) {
-      console.error("Cash payment error:", error)
+      log.error("Cash payment error:", error)
       return {
         success: false,
         error: "Nakit ödeme hatası: " + error.message,
@@ -127,6 +136,7 @@ class PaymentService {
 
       const transactionId = this.generateTransactionId()
 
+      log.info(`Processing card payment: ${amount} TL, installments: ${installments}`)
       // POS cihazına ödeme talebi gönder
       const posResponse = await this.sendPaymentRequestToPOS(amount, installments)
 
@@ -146,12 +156,14 @@ class PaymentService {
         }
 
         this.lastTransactionId = transactionId
+        log.info(`Card payment completed: ${transactionId}`)
 
         return {
           success: true,
           transaction: transaction,
         }
       } else {
+        log.warn(`Card payment failed: ${posResponse.error}`)
         return {
           success: false,
           error: posResponse.error || "Kart ödeme reddedildi",
@@ -159,7 +171,7 @@ class PaymentService {
         }
       }
     } catch (error) {
-      console.error("Card payment error:", error)
+      log.error("Card payment error:", error)
       return {
         success: false,
         error: "Kart ödeme hatası: " + error.message,
