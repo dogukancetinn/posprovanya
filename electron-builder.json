@@ -1,0 +1,51 @@
+{
+  "appId": "com.provanya.pos",
+  "productName": "PROVANYA POS",
+  "directories": {
+    "output": "dist",
+    "buildResources": "build"
+  },
+  "files": ["src/**/*", "public/**/*", "node_modules/**/*", "package.json"],
+  "extraResources": [
+    {
+      "from": "src/database/migrations",
+      "to": "migrations"
+    }
+  ],
+  "win": {
+    "target": [
+      {
+        "target": "nsis",
+        "arch": ["x64"]
+      }
+    ],
+    "icon": "build/icon.ico",
+    "requestedExecutionLevel": "requireAdministrator",
+    "artifactName": "${productName}-${version}-Setup.${ext}",
+    "publisherName": "PROVANYA",
+    "verifyUpdateCodeSignature": false
+  },
+  "nsis": {
+    "oneClick": false,
+    "perMachine": true,
+    "allowElevation": true,
+    "allowToChangeInstallationDirectory": true,
+    "installerIcon": "build/icon.ico",
+    "uninstallerIcon": "build/icon.ico",
+    "installerHeaderIcon": "build/icon.ico",
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true,
+    "shortcutName": "PROVANYA POS",
+    "include": "build/installer.nsh",
+    "script": "build/installer.nsh",
+    "deleteAppDataOnUninstall": false,
+    "runAfterFinish": true,
+    "menuCategory": "PROVANYA",
+    "displayLanguageSelector": true,
+    "installerLanguages": ["tr_TR", "en_US"]
+  },
+  "compression": "maximum",
+  "npmRebuild": false,
+  "buildDependenciesFromSource": false,
+  "nodeGypRebuild": false
+}
