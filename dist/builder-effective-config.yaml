@@ -1,0 +1,34 @@
+directories:
+  output: dist
+  buildResources: build
+  app: .
+appId: com.provanya.pos
+productName: PROVANYA POS
+files:
+  - filter:
+      - src/**/*
+      - assets/**/*
+      - node_modules/**/*
+      - package.json
+asar: true
+asarUnpack:
+  - '**/node_modules/better-sqlite3/**'
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: assets/icon.ico
+  requestedExecutionLevel: requireAdministrator
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: PROVANYAPOS
+  installerIcon: assets/icon.ico
+  uninstallerIcon: assets/icon.ico
+  installerHeaderIcon: assets/icon.ico
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+electronVersion: 37.3.0
